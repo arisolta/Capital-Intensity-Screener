@@ -32,11 +32,17 @@ such as `Avg_Dep_Factor_3Y`, `ROIC_Latest`, `FCF_EBITDA_Ratio`, or `FCF_Yield`.
 `Score` is a 100-point heuristic that blends:
 
 - Capital intensity: average depreciation factor, D&A/EBIT, CapEx/revenue
-- Business quality: ROIC, FCF/EBITDA, FCF margin, gross margin, operating margin
+- Business quality: ROIC, SBC-adjusted FCF/EBITDA, SBC-adjusted FCF margin,
+  gross margin, operating margin
 - Growth and trend: revenue CAGR, EBIT CAGR, ROIC trend, EBIT margin trend
 - Stability: standard deviation of annual revenue growth
-- Balance sheet and valuation: net debt/EBITDA, FCF yield, EV/EBITDA, EV/EBIT
+- Balance sheet and valuation: net debt/EBITDA, SBC-adjusted FCF yield,
+  EV/EBITDA, EV/EBIT
 - Shareholder discipline: 3-year share count CAGR, rewarding buybacks and penalizing dilution
 
 The score is meant for ranking and triage. It is not a replacement for business
 quality assessment, normalized earnings work, or valuation.
+
+FCF is calculated as operating cash flow plus capital expenditure. Adjusted FCF
+subtracts stock-based compensation when yfinance provides it. The score uses
+adjusted FCF metrics; raw FCF metrics remain in exports for comparison.

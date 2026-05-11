@@ -54,13 +54,14 @@ TERMINAL_COLUMNS = [
     ("EBIT_CAGR_3Y", "EBIT CAGR", False),
     ("ROIC_Latest", "ROIC", True),
     ("ROIC_Trend_3Y", "ROIC Tr", False),
-    ("FCF_EBITDA_Ratio", "FCF/EBITDA", True),
-    ("FCF_Margin", "FCF Mrg", False),
+    ("Adj_FCF_EBITDA_Ratio", "Adj FCF/EBITDA", True),
+    ("Adj_FCF_Margin", "Adj FCF Mrg", False),
+    ("SBC_Rev_Ratio", "SBC/Rev", False),
     ("CapEx_Rev_Ratio", "CapEx/Rev", False),
     ("Net_Debt_EBITDA", "ND/EBITDA", False),
     ("EV_EBITDA", "EV/EBITDA", False),
     ("EV_EBIT", "EV/EBIT", False),
-    ("FCF_Yield", "FCF Yield", True),
+    ("Adj_FCF_Yield", "Adj FCF Yield", True),
     ("Intensity_Level", "Level", True),
     ("Score", "Score", True),
 ]
@@ -71,7 +72,8 @@ DROP_PRIORITY = [
     "Operating_Margin",
     "Share_Count_CAGR_3Y",
     "CapEx_Rev_Ratio",
-    "FCF_Margin",
+    "SBC_Rev_Ratio",
+    "Adj_FCF_Margin",
     "EBIT_CAGR_3Y",
     "ROIC_Trend_3Y",
     "Dep_Factor_TTM",
@@ -322,14 +324,29 @@ def calculate_ttm(financials_q: pd.DataFrame, cashflow_q: pd.DataFrame) -> dict[
         ebitda = ebit + depreciation if not np.isnan(depreciation) else np.nan
     operating_cash_flow = sum_line(cashflow_q, ["Operating Cash Flow", "Total Cash From Operating Activities"], cf_periods)
     capex = sum_line(cashflow_q, ["Capital Expenditure", "Capital Expenditures"], cf_periods)
+    sbc = sum_line(cashflow_q, sbc_labels(), cf_periods)
+    fcf = operating_cash_flow + capex if not np.isnan(operating_cash_flow) else np.nan
+    adj_fcf = fcf - sbc if not np.isnan(fcf) and not np.isnan(sbc) else fcf
 
     return {
         "revenue": revenue,
         "ebit": ebit,
         "ebitda": ebitda,
-        "fcf": operating_cash_flow + capex if not np.isnan(operating_cash_flow) else np.nan,
+        "fcf": fcf,
+        "sbc": sbc,
+        "adj_fcf": adj_fcf,
         "capex": capex,
     }
+
+
+def sbc_labels() -> list[str]:
+    return [
+        "Stock Based Compensation",
+        "Stock Based Compensation And Other",
+        "Share Based Compensation",
+        "Share Based Compensation Expense",
+        "Stock-Based Compensation",
+    ]
 
 
 def calculate_roic(period: str, financials: pd.DataFrame, balance_sheet: pd.DataFrame, tax_rate: float) -> float:
@@ -416,8 +433,9 @@ def calculate_score(row: pd.Series) -> float:
 
     # Business quality and cash conversion.
     score += score_higher(row.get("ROIC_Latest", np.nan), 15, full_at=0.25, zero_at=0.0)
-    score += score_higher(row.get("FCF_EBITDA_Ratio", np.nan), 7, full_at=0.75, zero_at=0.0)
-    score += score_higher(row.get("FCF_Margin", np.nan), 5, full_at=0.20, zero_at=0.0)
+    score += score_higher(row.get("Adj_FCF_EBITDA_Ratio", np.nan), 7, full_at=0.75, zero_at=0.0)
+    score += score_higher(row.get("Adj_FCF_Margin", np.nan), 5, full_at=0.20, zero_at=0.0)
+    score += score_lower(row.get("SBC_Rev_Ratio", np.nan), 2, best_at=0.0, zero_at=0.08)
     score += score_higher(row.get("Gross_Margin", np.nan), 1.5, full_at=0.60, zero_at=0.20)
     score += score_higher(row.get("Operating_Margin", np.nan), 1.5, full_at=0.30, zero_at=0.05)
 
@@ -429,7 +447,7 @@ def calculate_score(row: pd.Series) -> float:
     score += score_range(row.get("Revenue_Stability", np.nan), 2, low_full=0.03, high_zero=0.20)
 
     # Valuation, leverage, and shareholder dilution discipline.
-    score += score_higher(row.get("FCF_Yield", np.nan), 7, full_at=0.06, zero_at=0.0)
+    score += score_higher(row.get("Adj_FCF_Yield", np.nan), 7, full_at=0.06, zero_at=0.0)
     score += score_lower(row.get("EV_EBITDA", np.nan), 5, best_at=8.0, zero_at=30.0)
     score += score_lower(row.get("EV_EBIT", np.nan), 3, best_at=10.0, zero_at=40.0)
     score += score_lower(row.get("Net_Debt_EBITDA", np.nan), 5, best_at=0.0, zero_at=4.0)
@@ -477,7 +495,9 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
             period,
         )
         capex = find_statement_value(cashflow, ["Capital Expenditure", "Capital Expenditures"], period)
+        sbc = find_statement_value(cashflow, sbc_labels(), period)
         fcf = operating_cash_flow + capex if not np.isnan(operating_cash_flow) else np.nan
+        adj_fcf = fcf - sbc if not np.isnan(fcf) and not np.isnan(sbc) else fcf
         average_shares = find_statement_value(
             financials,
             ["Diluted Average Shares", "Basic Average Shares", "Average Dilution Earnings"],
@@ -493,6 +513,8 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
                 "ebitda": ebitda,
                 "depreciation": ebitda - ebit if not np.isnan(ebitda) and not np.isnan(ebit) else np.nan,
                 "fcf": fcf,
+                "sbc": sbc,
+                "adj_fcf": adj_fcf,
                 "capex": abs(capex) if not np.isnan(capex) else np.nan,
                 "average_shares": average_shares,
                 "gross_margin": safe_positive_divide(gross_profit, revenue),
@@ -501,6 +523,10 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
                 "da_to_ebit": safe_positive_divide(ebitda - ebit, ebit),
                 "fcf_ebitda": safe_positive_divide(fcf, ebitda),
                 "fcf_margin": safe_positive_divide(fcf, revenue),
+                "adj_fcf_ebitda": safe_positive_divide(adj_fcf, ebitda),
+                "adj_fcf_margin": safe_positive_divide(adj_fcf, revenue),
+                "sbc_revenue": safe_positive_divide(sbc, revenue),
+                "sbc_fcf": safe_positive_divide(sbc, fcf),
                 "capex_revenue": safe_positive_divide(abs(capex), revenue),
                 "net_debt": calculate_net_debt(period, balance_sheet),
                 "roic": calculate_roic(period, financials, balance_sheet, tax_rate),
@@ -531,13 +557,16 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
     ttm_ebit = ttm.get("ebit", np.nan)
     ttm_ebitda = ttm.get("ebitda", np.nan)
     ttm_fcf = ttm.get("fcf", np.nan)
+    ttm_adj_fcf = ttm.get("adj_fcf", np.nan)
     fallback_fcf = latest["fcf"]
+    fallback_adj_fcf = latest["adj_fcf"]
 
     market_cap = to_float(info.get("marketCap"))
     enterprise_value = to_float(info.get("enterpriseValue"))
     current_ebitda = ttm_ebitda if not np.isnan(ttm_ebitda) else latest["ebitda"]
     current_ebit = ttm_ebit if not np.isnan(ttm_ebit) else latest["ebit"]
     current_fcf = ttm_fcf if not np.isnan(ttm_fcf) else fallback_fcf
+    current_adj_fcf = ttm_adj_fcf if not np.isnan(ttm_adj_fcf) else fallback_adj_fcf
 
     result: dict[str, Any] = {
         "Ticker": ticker,
@@ -557,6 +586,10 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
         "EBIT_Margin_Trend_3Y": ebit_margin_trend,
         "FCF_EBITDA_Ratio": nanmean([row["fcf_ebitda"] for row in annual_rows]),
         "FCF_Margin": nanmean([row["fcf_margin"] for row in annual_rows]),
+        "Adj_FCF_EBITDA_Ratio": nanmean([row["adj_fcf_ebitda"] for row in annual_rows]),
+        "Adj_FCF_Margin": nanmean([row["adj_fcf_margin"] for row in annual_rows]),
+        "SBC_Rev_Ratio": nanmean([row["sbc_revenue"] for row in annual_rows]),
+        "SBC_FCF_Ratio": nanmean([row["sbc_fcf"] for row in annual_rows]),
         "CapEx_Rev_Ratio": nanmean([row["capex_revenue"] for row in annual_rows]),
         "Net_Debt_EBITDA": safe_positive_divide(latest["net_debt"], current_ebitda),
         "Share_Count_CAGR_3Y": share_count_cagr,
@@ -564,6 +597,7 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
         "EV_EBITDA": safe_positive_divide(enterprise_value, current_ebitda),
         "EV_EBIT": safe_positive_divide(enterprise_value, current_ebit),
         "FCF_Yield": safe_positive_divide(current_fcf, market_cap),
+        "Adj_FCF_Yield": safe_positive_divide(current_adj_fcf, market_cap),
     }
 
     for idx, period in enumerate(periods, start=1):
@@ -604,7 +638,10 @@ def screen_tickers(tickers: list[str], config: ScreenerConfig) -> tuple[pd.DataF
         "EBIT_Margin_Trend_3Y",
         "FCF_EBITDA_Ratio",
         "FCF_Margin",
+        "Adj_FCF_EBITDA_Ratio",
+        "Adj_FCF_Margin",
         "FCF_Yield",
+        "Adj_FCF_Yield",
         "Score",
     }
     ascending = config.rank_by not in higher_is_better
@@ -630,8 +667,13 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
         "EBIT_Margin_Trend_3Y",
         "FCF_EBITDA_Ratio",
         "FCF_Margin",
+        "Adj_FCF_EBITDA_Ratio",
+        "Adj_FCF_Margin",
+        "SBC_Rev_Ratio",
+        "SBC_FCF_Ratio",
         "CapEx_Rev_Ratio",
         "FCF_Yield",
+        "Adj_FCF_Yield",
         "D&A_EBIT_Ratio",
         "Share_Count_CAGR_3Y",
         "Revenue_Stability",
@@ -657,15 +699,20 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
         "EBIT_CAGR_3Y",
         "ROIC_Latest",
         "ROIC_Trend_3Y",
-        "FCF_EBITDA_Ratio",
-        "FCF_Margin",
+        "Adj_FCF_EBITDA_Ratio",
+        "Adj_FCF_Margin",
+        "SBC_Rev_Ratio",
         "CapEx_Rev_Ratio",
         "Net_Debt_EBITDA",
         "EV_EBITDA",
         "EV_EBIT",
-        "FCF_Yield",
+        "Adj_FCF_Yield",
         "Intensity_Level",
         "Score",
+        "FCF_EBITDA_Ratio",
+        "FCF_Margin",
+        "FCF_Yield",
+        "SBC_FCF_Ratio",
         "Gross_Margin",
         "Operating_Margin",
         "EBIT_Margin_Trend_3Y",
