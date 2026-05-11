@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.cache/
+.venv/
+venv/
+env/
+*.csv
+*.xlsx
+*.xls
+*.md.export
