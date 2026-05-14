@@ -428,30 +428,30 @@ def calculate_score(row: pd.Series) -> float:
 
     # Capital intensity: low D&A burden and low capex needs are better.
     score += score_lower(row.get("Avg_Dep_Factor_3Y", np.nan), 18, best_at=1.05, zero_at=2.0)
-    score += score_lower(row.get("D&A_EBIT_Ratio", np.nan), 3, best_at=0.05, zero_at=1.0)
-    score += score_lower(row.get("CapEx_Rev_Ratio", np.nan), 4, best_at=0.02, zero_at=0.15)
+    score += score_lower(row.get("CapEx_Rev_Ratio", np.nan), 7, best_at=0.02, zero_at=0.15)
 
-    # Business quality and cash conversion.
-    score += score_higher(row.get("ROIC_Latest", np.nan), 15, full_at=0.25, zero_at=0.0)
+    # Returns and quality.
+    score += score_higher(row.get("ROIC_Latest", np.nan), 17, full_at=0.25, zero_at=0.0)
+    score += score_higher(row.get("ROIC_Trend_3Y", np.nan), 5, full_at=0.05, zero_at=-0.05)
+    score += score_higher(row.get("Operating_Margin", np.nan), 3, full_at=0.30, zero_at=0.05)
+    score += score_higher(row.get("Gross_Margin", np.nan), 2, full_at=0.60, zero_at=0.20)
+
+    # Cash conversion after treating SBC as an economic cost.
     score += score_higher(row.get("Adj_FCF_EBITDA_Ratio", np.nan), 7, full_at=0.75, zero_at=0.0)
-    score += score_higher(row.get("Adj_FCF_Margin", np.nan), 5, full_at=0.20, zero_at=0.0)
+    score += score_higher(row.get("Adj_FCF_Margin", np.nan), 6, full_at=0.20, zero_at=0.0)
     score += score_lower(row.get("SBC_Rev_Ratio", np.nan), 2, best_at=0.0, zero_at=0.08)
-    score += score_higher(row.get("Gross_Margin", np.nan), 1.5, full_at=0.60, zero_at=0.20)
-    score += score_higher(row.get("Operating_Margin", np.nan), 1.5, full_at=0.30, zero_at=0.05)
 
     # Growth, stability, and direction of returns/margins.
-    score += score_higher(row.get("Rev_CAGR_3Y", np.nan), 6, full_at=0.12, zero_at=-0.05)
-    score += score_higher(row.get("EBIT_CAGR_3Y", np.nan), 5, full_at=0.15, zero_at=-0.10)
-    score += score_higher(row.get("ROIC_Trend_3Y", np.nan), 4, full_at=0.05, zero_at=-0.05)
-    score += score_higher(row.get("EBIT_Margin_Trend_3Y", np.nan), 3, full_at=0.05, zero_at=-0.05)
+    score += score_higher(row.get("Rev_CAGR_3Y", np.nan), 4, full_at=0.12, zero_at=-0.05)
+    score += score_higher(row.get("EBIT_CAGR_3Y", np.nan), 7, full_at=0.15, zero_at=-0.10)
+    score += score_higher(row.get("EBIT_Margin_Trend_3Y", np.nan), 2, full_at=0.05, zero_at=-0.05)
     score += score_range(row.get("Revenue_Stability", np.nan), 2, low_full=0.03, high_zero=0.20)
 
     # Valuation, leverage, and shareholder dilution discipline.
     score += score_higher(row.get("Adj_FCF_Yield", np.nan), 7, full_at=0.06, zero_at=0.0)
-    score += score_lower(row.get("EV_EBITDA", np.nan), 5, best_at=8.0, zero_at=30.0)
-    score += score_lower(row.get("EV_EBIT", np.nan), 3, best_at=10.0, zero_at=40.0)
-    score += score_lower(row.get("Net_Debt_EBITDA", np.nan), 5, best_at=0.0, zero_at=4.0)
-    score += score_lower(row.get("Share_Count_CAGR_3Y", np.nan), 5, best_at=-0.03, zero_at=0.05)
+    score += score_lower(row.get("EV_EBIT", np.nan), 5, best_at=10.0, zero_at=40.0)
+    score += score_lower(row.get("Net_Debt_EBITDA", np.nan), 4, best_at=0.0, zero_at=4.0)
+    score += score_lower(row.get("Share_Count_CAGR_3Y", np.nan), 2, best_at=-0.03, zero_at=0.05)
 
     return round(score, 1)
 
@@ -467,16 +467,17 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
     if financials.empty:
         raise ValueError("no annual income statement returned")
 
-    periods = latest_periods(financials, years)
-    if len(periods) < 2:
+    all_periods = latest_periods(financials, years + 1)
+    if len(all_periods) < 2:
         raise ValueError("not enough annual financial statement history")
+    average_periods = all_periods[:years]
 
     annual_rows: list[dict[str, float]] = []
     tax_rate = to_float(info.get("effectiveTaxRate"))
     if np.isnan(tax_rate) or tax_rate < 0 or tax_rate > 0.5:
         tax_rate = 0.21
 
-    for period in periods:
+    for period in all_periods:
         revenue = find_statement_value(financials, ["Total Revenue", "Operating Revenue"], period)
         gross_profit = find_statement_value(financials, ["Gross Profit"], period)
         ebit = find_statement_value(financials, ["EBIT", "Operating Income"], period)
@@ -535,18 +536,24 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
 
     rows_by_period = {row["period"]: row for row in annual_rows}
     latest = annual_rows[0]
-    oldest = annual_rows[-1]
-    rev_cagr = cagr(oldest["revenue"], latest["revenue"], len(annual_rows) - 1)
-    ebit_cagr = cagr(oldest["ebit"], latest["ebit"], len(annual_rows) - 1)
-    share_count_cagr = cagr(oldest["average_shares"], latest["average_shares"], len(annual_rows) - 1)
-    roic_trend = latest["roic"] - oldest["roic"] if not np.isnan(latest["roic"]) and not np.isnan(oldest["roic"]) else np.nan
+    average_rows = annual_rows[:years]
+    growth_intervals = min(years, len(annual_rows) - 1)
+    oldest_growth = annual_rows[growth_intervals]
+    rev_cagr = cagr(oldest_growth["revenue"], latest["revenue"], growth_intervals)
+    ebit_cagr = cagr(oldest_growth["ebit"], latest["ebit"], growth_intervals)
+    share_count_cagr = cagr(oldest_growth["average_shares"], latest["average_shares"], growth_intervals)
+    roic_trend = (
+        latest["roic"] - oldest_growth["roic"]
+        if not np.isnan(latest["roic"]) and not np.isnan(oldest_growth["roic"])
+        else np.nan
+    )
     ebit_margin_trend = (
-        latest["operating_margin"] - oldest["operating_margin"]
-        if not np.isnan(latest["operating_margin"]) and not np.isnan(oldest["operating_margin"])
+        latest["operating_margin"] - oldest_growth["operating_margin"]
+        if not np.isnan(latest["operating_margin"]) and not np.isnan(oldest_growth["operating_margin"])
         else np.nan
     )
 
-    chronological_rows = list(reversed(annual_rows))
+    chronological_rows = list(reversed(annual_rows[: growth_intervals + 1]))
     revenue_growth_rates = [
         safe_positive_divide(chronological_rows[idx]["revenue"], chronological_rows[idx - 1]["revenue"]) - 1
         for idx in range(1, len(chronological_rows))
@@ -573,24 +580,24 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
         "Company Name": info.get("shortName") or info.get("longName") or ticker,
         "Is_Benchmark": is_benchmark,
         "Currency": info.get("financialCurrency") or info.get("currency"),
-        "Avg_Dep_Factor_3Y": nanmean([row["dep_factor"] for row in annual_rows]),
+        "Avg_Dep_Factor_3Y": nanmean([row["dep_factor"] for row in average_rows]),
         "Dep_Factor_TTM": safe_positive_divide(ttm_ebitda, ttm_ebit),
-        "D&A_EBIT_Ratio": nanmean([row["da_to_ebit"] for row in annual_rows]),
+        "D&A_EBIT_Ratio": nanmean([row["da_to_ebit"] for row in average_rows]),
         "Rev_CAGR_3Y": rev_cagr,
         "EBIT_CAGR_3Y": ebit_cagr,
         "ROIC_Latest": latest["roic"],
-        "ROIC_Avg_3Y": nanmean([row["roic"] for row in annual_rows]),
+        "ROIC_Avg_3Y": nanmean([row["roic"] for row in average_rows]),
         "ROIC_Trend_3Y": roic_trend,
         "Gross_Margin": latest["gross_margin"],
         "Operating_Margin": latest["operating_margin"],
         "EBIT_Margin_Trend_3Y": ebit_margin_trend,
-        "FCF_EBITDA_Ratio": nanmean([row["fcf_ebitda"] for row in annual_rows]),
-        "FCF_Margin": nanmean([row["fcf_margin"] for row in annual_rows]),
-        "Adj_FCF_EBITDA_Ratio": nanmean([row["adj_fcf_ebitda"] for row in annual_rows]),
-        "Adj_FCF_Margin": nanmean([row["adj_fcf_margin"] for row in annual_rows]),
-        "SBC_Rev_Ratio": nanmean([row["sbc_revenue"] for row in annual_rows]),
-        "SBC_FCF_Ratio": nanmean([row["sbc_fcf"] for row in annual_rows]),
-        "CapEx_Rev_Ratio": nanmean([row["capex_revenue"] for row in annual_rows]),
+        "FCF_EBITDA_Ratio": nanmean([row["fcf_ebitda"] for row in average_rows]),
+        "FCF_Margin": nanmean([row["fcf_margin"] for row in average_rows]),
+        "Adj_FCF_EBITDA_Ratio": nanmean([row["adj_fcf_ebitda"] for row in average_rows]),
+        "Adj_FCF_Margin": nanmean([row["adj_fcf_margin"] for row in average_rows]),
+        "SBC_Rev_Ratio": nanmean([row["sbc_revenue"] for row in average_rows]),
+        "SBC_FCF_Ratio": nanmean([row["sbc_fcf"] for row in average_rows]),
+        "CapEx_Rev_Ratio": nanmean([row["capex_revenue"] for row in average_rows]),
         "Net_Debt_EBITDA": safe_positive_divide(latest["net_debt"], current_ebitda),
         "Share_Count_CAGR_3Y": share_count_cagr,
         "Revenue_Stability": revenue_stability,
@@ -600,7 +607,7 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
         "Adj_FCF_Yield": safe_positive_divide(current_adj_fcf, market_cap),
     }
 
-    for idx, period in enumerate(periods, start=1):
+    for idx, period in enumerate(average_periods, start=1):
         result[f"Dep_Factor_Y{idx}"] = rows_by_period[period]["dep_factor"]
         result[f"Fiscal_Y{idx}"] = period[:10]
 
@@ -874,6 +881,11 @@ def print_summary(df: pd.DataFrame, errors: list[str]) -> None:
     print(
         f"Summary: {total} stocks screened | "
         f"{low} Low Intensity (<1.4) | {moderate} Moderate (1.4-1.7) | {high} High (>1.7)"
+    )
+    print(
+        "How to read: Avg DF = EBITDA / EBIT, lower is better "
+        "(<1.4 low capital intensity). Score = 0-100 composite; "
+        "80+ strong, 70-80 good, 60-70 mixed, <60 weak."
     )
     if errors:
         print("\nSkipped / warnings:")
