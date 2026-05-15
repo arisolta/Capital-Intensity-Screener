@@ -19,13 +19,71 @@ still runs without `rich`; CSV and Markdown export do not need Excel packages.
 python3 capital_screener.py --tickers AAPL GOOGL MSFT UL PYPL GIS CLX HENKY
 python3 capital_screener.py --file my_universe.txt --export results.xlsx
 python3 capital_screener.py --tickers AAPL MSFT --rank-by ROIC_Latest --min-roic 12
-python3 capital_screener.py --tickers AAPL MSFT ADS.DE UMG.AS --benchmark SPY
+python3 capital_screener.py --tickers AAPL MSFT ADS.DE UMG.AS
 ```
-
-Supported export formats: `.csv`, `.xlsx`, `.xls`, `.md`, `.markdown`.
 
 The default rank column is `Score` descending. Use `--rank-by` for other columns
 such as `Avg_Dep_Factor_3Y`, `ROIC_Latest`, `FCF_EBITDA_Ratio`, or `FCF_Yield`.
+
+## Exporting Results
+
+Use `--export` followed by the output filename:
+
+```bash
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export results.csv
+```
+
+This prints the compact terminal table and also writes a full export file.
+
+The file is written relative to the folder where you run the command. For
+example, if you run:
+
+```bash
+cd /Users/arashsoltanieh/Documents/Codex/2026-05-11/build-a-python-based-capital-intensity
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export results.csv
+```
+
+the file will be created here:
+
+```text
+/Users/arashsoltanieh/Documents/Codex/2026-05-11/build-a-python-based-capital-intensity/results.csv
+```
+
+You can also provide an explicit path:
+
+```bash
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export exports/quality_screen.csv
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export /tmp/quality_screen.csv
+```
+
+Supported export formats are determined by the file extension:
+
+| Extension | Output |
+|---|---|
+| `.csv` | CSV file |
+| `.xlsx` | Excel workbook |
+| `.xls` | Excel workbook |
+| `.md` | Markdown table |
+| `.markdown` | Markdown table |
+
+Examples:
+
+```bash
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export results.csv
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export results.xlsx
+python3 capital_screener.py --tickers AAPL MSFT GOOGL --export results.md
+```
+
+The terminal table is intentionally compact and may hide some columns to avoid
+wrapping. Export files include the full DataFrame with all calculated metrics,
+including raw FCF, adjusted FCF, scoring inputs, fiscal-year depreciation
+factors, and current valuation metrics.
+
+Excel export requires `openpyxl`, which is included in `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Data Windows
 

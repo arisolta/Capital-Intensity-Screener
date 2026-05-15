@@ -90,7 +90,6 @@ class ScreenerConfig:
     min_roic: float | None = None
     max_dep_factor: float | None = None
     use_cache: bool = True
-    benchmark: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,10 +115,6 @@ def parse_args() -> argparse.Namespace:
         help="Export path. Supported extensions: .csv, .xlsx, .xls, .md, .markdown",
     )
     parser.add_argument(
-        "--benchmark",
-        help="Optional benchmark ticker to include for comparison, e.g. SPY",
-    )
-    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable local JSON cache for yfinance responses",
@@ -132,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_tickers(cli_tickers: list[str] | None, file_path: Path | None, benchmark: str | None) -> list[str]:
+def load_tickers(cli_tickers: list[str] | None, file_path: Path | None) -> list[str]:
     tickers: list[str] = []
     if cli_tickers:
         tickers.extend(cli_tickers)
@@ -149,9 +144,6 @@ def load_tickers(cli_tickers: list[str] | None, file_path: Path | None, benchmar
 
     if not tickers:
         tickers = DEFAULT_TICKERS.copy()
-
-    if benchmark:
-        tickers.append(benchmark)
 
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -456,7 +448,7 @@ def calculate_score(row: pd.Series) -> float:
     return round(score, 1)
 
 
-def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benchmark: bool = False) -> dict[str, Any]:
+def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3) -> dict[str, Any]:
     info = data["info"]
     financials = data["financials"]
     cashflow = data["cashflow"]
@@ -578,7 +570,6 @@ def calculate_metrics(ticker: str, data: dict[str, Any], years: int = 3, is_benc
     result: dict[str, Any] = {
         "Ticker": ticker,
         "Company Name": info.get("shortName") or info.get("longName") or ticker,
-        "Is_Benchmark": is_benchmark,
         "Currency": info.get("financialCurrency") or info.get("currency"),
         "Avg_Dep_Factor_3Y": nanmean([row["dep_factor"] for row in average_rows]),
         "Dep_Factor_TTM": safe_positive_divide(ttm_ebitda, ttm_ebit),
@@ -622,8 +613,7 @@ def screen_tickers(tickers: list[str], config: ScreenerConfig) -> tuple[pd.DataF
     for ticker in tickers:
         try:
             data = get_financials(ticker, use_cache=config.use_cache)
-            is_benchmark = ticker == config.benchmark
-            results.append(calculate_metrics(ticker, data, years=config.years, is_benchmark=is_benchmark))
+            results.append(calculate_metrics(ticker, data, years=config.years))
         except Exception as exc:  # noqa: BLE001 - CLI should continue across bad tickers
             errors.append(f"{ticker}: {exc}")
 
@@ -726,7 +716,7 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
         "Share_Count_CAGR_3Y",
         "Revenue_Stability",
     ]
-    remaining = [col for col in display.columns if col not in preferred and col != "Is_Benchmark"]
+    remaining = [col for col in display.columns if col not in preferred]
     return display[[col for col in preferred if col in display.columns] + remaining]
 
 
@@ -900,11 +890,10 @@ def main() -> int:
         min_roic=args.min_roic,
         max_dep_factor=args.max_dep_factor,
         use_cache=not args.no_cache,
-        benchmark=args.benchmark.upper() if args.benchmark else None,
     )
 
     try:
-        tickers = load_tickers(args.tickers, args.file, config.benchmark)
+        tickers = load_tickers(args.tickers, args.file)
     except Exception as exc:  # noqa: BLE001
         print(f"Input error: {exc}", file=sys.stderr)
         return 2
